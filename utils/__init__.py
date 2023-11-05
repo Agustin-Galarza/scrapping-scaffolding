@@ -1,12 +1,22 @@
 from tqdm import tqdm
 from typing import Optional
+from requests import Response
+
+
+def check_response(response: Response):
+    if not response.ok:
+        raise Exception(f"Error on request, obtained: {response.status_code}")
 
 
 class ShowsProgress:
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
+        try:
+            super(ShowsProgress, self).__init__(**kwargs)
+        except TypeError:
+            super(ShowsProgress, self).__init__()
         self.pbar: Optional[tqdm] = None
         self.last_fail: int = 1
-        self.stats = dict(tries=0, fails=0)
+        self.progress = dict(tries=0, fails=0)
         self.__base_description = ""
         self.__last_progress_update = 0
 
@@ -17,29 +27,52 @@ class ShowsProgress:
 
     def update_progress_bar(self):
         if self.pbar is not None:
-            update_delta = self.stats["tries"] - self.__last_progress_update
+            update_delta = self.progress["tries"] - self.__last_progress_update
             if self.get_fails() > self.last_fail:
                 self.pbar.set_description(
-                    f"{self.__base_description} ({self.stats['fails']} fails)"
+                    f"{self.__base_description} ({self.progress['fails']} fails)"
                 )
                 self.last_fail = self.get_fails()
             self.pbar.update(n=update_delta)
-            self.__last_progress_update = self.stats["tries"]
+            self.__last_progress_update = self.progress["tries"]
 
     def clear_progress_bar(self):
         if self.pbar is not None:
             self.pbar.close()
 
     def advance_progress(self, update_pbar=True):
-        self.stats["tries"] += 1
+        self.progress["tries"] += 1
         if update_pbar:
             self.update_progress_bar()
 
     def add_fail(self):
-        self.stats["fails"] += 1
+        self.progress["fails"] += 1
 
     def get_fails(self) -> int:
-        return self.stats["fails"]
+        return self.progress["fails"]
 
     def get_tries(self) -> int:
-        return self.stats["tries"]
+        return self.progress["tries"]
+
+
+class HasStats:
+    def __init__(self, *args, **kwargs) -> None:
+        try:
+            super(HasStats, self).__init__(**kwargs)
+        except TypeError:
+            super(HasStats, self).__init__()
+
+
+class NamedResource:
+    def __init__(self, *args, **kwargs) -> None:
+        try:
+            super(NamedResource, self).__init__(**kwargs)
+        except TypeError:
+            super(NamedResource, self).__init__()
+        self.name = kwargs.get("name")
+
+    def get_name(self) -> str:
+        return self.name
+
+    def set_name(self, name: str) -> None:
+        self.name = name
