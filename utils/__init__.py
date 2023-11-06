@@ -64,15 +64,22 @@ class HasStats:
 
 
 class NamedResource:
+    @classmethod
+    def default_name(cls):
+        return cls.__name__
+
     def __init__(self, *args, **kwargs) -> None:
         try:
             super(NamedResource, self).__init__(**kwargs)
         except TypeError:
             super(NamedResource, self).__init__()
-        self.name = kwargs.get("name")
+        self.name = kwargs.get("name", self.default_name())
 
     def get_name(self) -> str:
         return self.name
 
     def set_name(self, name: str) -> None:
         self.name = name
+
+    def has_default_name(self) -> bool:
+        return self.get_name() == self.default_name()

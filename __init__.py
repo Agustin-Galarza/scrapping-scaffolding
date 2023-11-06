@@ -24,7 +24,7 @@ class ScrappingInfo:
     request_headers: dict
 
 
-class ScrappingJob(ABC):
+class ScrappingJob(ABC, NamedResource):
     def __init__(self, *args, **kwargs):
         try:
             super(ScrappingJob, self).__init__(**kwargs)
@@ -49,14 +49,11 @@ class ScrappingJob(ABC):
         pass
 
 
-class URLScrapper(ScrappingJob, ShowsProgress, NamedResource):
-    __DEFAULT_NAME = "ScrappingJob"
-
+class URLScrapper(ScrappingJob, ShowsProgress):
     def __init__(self, job: Callable[[str], List[str]], *args, **kwargs):
         """
         job: function that receives an html text and extratc a list of urls
         """
-        kwargs.setdefault("name", self.__DEFAULT_NAME)
         super(URLScrapper, self).__init__(**kwargs)
         self.base_description = kwargs.get("description", "Scrapping urls")
         # Stats
@@ -65,12 +62,7 @@ class URLScrapper(ScrappingJob, ShowsProgress, NamedResource):
         self.stats = dict(tries=0, fails=0, urls=[])
         # Job
         self.job = job
-
-    # Name
-    def has_default_name(self) -> bool:
-        return super().get_name() == self.__DEFAULT_NAME
-
-    #########################
+        print(self.get_name())
 
     # Stats
     def __add_stat(self, url: str, success: bool):
@@ -86,7 +78,7 @@ class URLScrapper(ScrappingJob, ShowsProgress, NamedResource):
         path = (
             self.stats_filepath
             if self.stats_filepath is not None
-            else f"./{self.name}-stats.log"
+            else f"./{self.get_name()}-stats.log"
         )
         with open(path, "w+") as file:
             json.dump(self.stats, file)
@@ -172,7 +164,6 @@ class URLScrapper(ScrappingJob, ShowsProgress, NamedResource):
     def on_exit(self, log_file: Optional[TextIOWrapper]) -> None:
         tries = self.stats["tries"]
         fails = self.stats["fails"]
-        successes = tries - fails
         super().print_statement(
             f"Scanned {tries} pages, failed to get {fails}",
             log_file,
@@ -181,22 +172,13 @@ class URLScrapper(ScrappingJob, ShowsProgress, NamedResource):
         self.__save_stats()
 
 
-class URLProcessor(ScrappingJob, NamedResource):
-    __DEFAULT_NAME = "URLProcessor"
-
+class URLProcessor(ScrappingJob):
     def __init__(
         self, processor: Callable[[List[str]], None], async_=False, *args, **kwargs
     ):
-        kwargs.setdefault("name", self.__DEFAULT_NAME)
         super(URLProcessor, self).__init__(**kwargs)
         self.processor = processor
         self.async_ = async_
-
-    # Name
-    def has_default_name(self) -> bool:
-        return super().get_name() == self.__DEFAULT_NAME
-
-    #####################
 
     def execute(self, urls: List[str], info: ScrappingInfo):
         if not self.async_:
@@ -218,11 +200,8 @@ class URLProcessor(ScrappingJob, NamedResource):
         pass
 
 
-class FileDownloader(ScrappingJob, ShowsProgress, NamedResource):
-    __DEFAULT_NAME = "FileDownloader"
-
+class FileDownloader(ScrappingJob, ShowsProgress):
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault("name", self.__DEFAULT_NAME)
         super(FileDownloader, self).__init__(**kwargs)
         self.directory = kwargs.get("dir", "./")
         self.base_name = kwargs.get("basename", "file")
@@ -233,12 +212,6 @@ class FileDownloader(ScrappingJob, ShowsProgress, NamedResource):
         self.stats_filepath: Optional[str] = kwargs.get("stats_filepath", None)
         self.append_files = kwargs.get("append_files", True)
         self.stats = dict(tries=0, fails=0, urls=[])
-
-    # Name
-    def has_default_name(self) -> bool:
-        return super().get_name() == self.__DEFAULT_NAME
-
-    ####################
 
     # Stats
     def __add_stat(self, url: str, success: bool):
@@ -334,7 +307,7 @@ class Scrapper:
         self.job_sequence = job_sequence
         self.__check_jobs()
         log_file = None
-        if usr_path := kwargs.get("log_file", None) is not None:
+        if (usr_path := kwargs.get("log_file", None)) is not None:
             log_filepaht = Path(usr_path)
             log_filepaht.touch(exist_ok=True)
             log_file = open(log_filepaht, "w+")
