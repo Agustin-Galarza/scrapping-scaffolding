@@ -333,7 +333,11 @@ class Scrapper:
     def __init__(self, job_sequence: List[ScrappingJob], *args, **kwargs):
         self.job_sequence = job_sequence
         self.__check_jobs()
-        log_filepaht = kwargs.get("log_file", None)
+        log_file = None
+        if usr_path := kwargs.get("log_file", None) is not None:
+            log_filepaht = Path(usr_path)
+            log_filepaht.touch(exist_ok=True)
+            log_file = open(log_filepaht, "w+")
         self.scrapping_info = ScrappingInfo(
             html_parser="html.parser",
             base_url=kwargs.get("base_url", ""),
@@ -341,7 +345,7 @@ class Scrapper:
             request_cooldown=kwargs.get("request_cooldown", 0),
             request_timeout=kwargs.get("request_timeout", 10),
             max_workers=kwargs.get("max_workers", 1),
-            log_file=open(log_filepaht, "w+") if log_filepaht is not None else None,
+            log_file=log_file,
             request_headers=kwargs.get("request_headers", {}),
         )
 
