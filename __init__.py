@@ -6,10 +6,9 @@ import concurrent.futures
 import requests
 import time
 from bs4 import BeautifulSoup
-import json
 from pathlib import Path
 
-from utils import NamedResource, ShowsProgress, check_response
+from utils import NamedResource, ShowsProgress, check_response, HasStats
 
 
 @dataclass
@@ -49,41 +48,16 @@ class ScrappingJob(ABC, NamedResource):
         pass
 
 
-class URLScrapper(ScrappingJob, ShowsProgress):
+class URLScrapper(ScrappingJob, ShowsProgress, HasStats):
     def __init__(self, job: Callable[[str], List[str]], *args, **kwargs):
         """
         job: function that receives an html text and extratc a list of urls
         """
         super(URLScrapper, self).__init__(**kwargs)
         self.base_description = kwargs.get("description", "Scrapping urls")
-        # Stats
-        self.save_stats = kwargs.get("save_stats", False)
-        self.stats_filepath: Optional[str] = kwargs.get("stats_filepath", None)
-        self.stats = dict(tries=0, fails=0, urls=[])
         # Job
         self.job = job
         print(self.get_name())
-
-    # Stats
-    def __add_stat(self, url: str, success: bool):
-        if not self.save_stats:
-            return
-        self.stats["tries"] += 1
-        self.stats["fails"] += 1 if not success else 0
-        self.stats["urls"].append(dict(value=url, processed=success))
-
-    def __save_stats(self):
-        if not self.save_stats:
-            return
-        path = (
-            self.stats_filepath
-            if self.stats_filepath is not None
-            else f"./{self.get_name()}-stats.log"
-        )
-        with open(path, "w+") as file:
-            json.dump(self.stats, file)
-
-    ########################
 
     def get_urls(self, url: str, info: ScrappingInfo) -> Optional[List[str]]:
         try:
@@ -122,10 +96,10 @@ class URLScrapper(ScrappingJob, ShowsProgress):
                 super().advance_progress()
                 res = self.get_urls(url, info)
                 if res is not None:
-                    self.__add_stat(url, True)
+                    self.add_stat(url, True)
                     output_links.extend(res)
                 else:
-                    self.__add_stat(url, False)
+                    self.add_stat(url, False)
             self.found_len = len(output_links)
             return output_links
 
@@ -149,13 +123,13 @@ class URLScrapper(ScrappingJob, ShowsProgress):
                 super().log_statement(
                     f"Could not search in url {url}: {e}", info.log_file
                 )
-                self.__add_stat(url, False)
+                self.add_stat(url, False)
             else:
                 if data is not None:
-                    self.__add_stat(url, True)
+                    self.add_stat(url, True)
                     output_links.extend(data)
                 else:
-                    self.__add_stat(url, False)
+                    self.add_stat(url, False)
 
         super().clear_progress_bar()
         self.found_len = len(output_links)
@@ -169,7 +143,7 @@ class URLScrapper(ScrappingJob, ShowsProgress):
             log_file,
         )
         super().print_statement(f"{self.found_len} links found", log_file)
-        self.__save_stats()
+        self.save_stats_in_file()
 
 
 class URLProcessor(ScrappingJob):
@@ -200,39 +174,15 @@ class URLProcessor(ScrappingJob):
         pass
 
 
-class FileDownloader(ScrappingJob, ShowsProgress):
+class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
     def __init__(self, *args, **kwargs):
         super(FileDownloader, self).__init__(**kwargs)
         self.directory = kwargs.get("dir", "./")
         self.base_name = kwargs.get("basename", "file")
         self.base_description = kwargs.get("description", "Downloading files")
         self.file_download_timeout = kwargs.get("file_timeout", 40)
-        # Stats
-        self.save_stats = kwargs.get("save_stats", False)
-        self.stats_filepath: Optional[str] = kwargs.get("stats_filepath", None)
+
         self.append_files = kwargs.get("append_files", True)
-        self.stats = dict(tries=0, fails=0, urls=[])
-
-    # Stats
-    def __add_stat(self, url: str, success: bool):
-        if not self.save_stats:
-            return
-        self.stats["tries"] += 1
-        self.stats["fails"] += 1 if not success else 0
-        self.stats["urls"].append(dict(value=url, processed=success))
-
-    def __save_stats(self):
-        if not self.save_stats:
-            return
-        path = (
-            self.stats_filepath
-            if self.stats_filepath is not None
-            else f"./{self.name}-stats.log"
-        )
-        with open(path, "w+") as file:
-            json.dump(self.stats, file)
-
-    ############################
 
     def __download_image(self, url: str, path: str, info: ScrappingInfo):
         try:
@@ -286,12 +236,12 @@ class FileDownloader(ScrappingJob, ShowsProgress):
             url = future_to_url[future]
             try:
                 future.result()
-                self.__add_stat(url, True)
+                self.add_stat(url, True)
             except Exception as ex:
                 super().log_statement(
                     f"Could not download image for {url}: {ex}", info.log_file
                 )
-                self.__add_stat(url, False)
+                self.add_stat(url, False)
 
     def on_exit(self, log_file: Optional[TextIOWrapper]) -> None:
         super().clear_progress_bar()
@@ -299,7 +249,7 @@ class FileDownloader(ScrappingJob, ShowsProgress):
             f"Tried to download {super().get_tries()} images, failed to download {super().get_fails()}",
             log_file,
         )
-        self.__save_stats()
+        self.save_stats_in_file()
 
 
 class Scrapper:

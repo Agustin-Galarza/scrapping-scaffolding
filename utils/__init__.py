@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from typing import Optional
 from requests import Response
+import json
 
 
 def check_response(response: Response):
@@ -61,6 +62,27 @@ class HasStats:
             super(HasStats, self).__init__(**kwargs)
         except TypeError:
             super(HasStats, self).__init__()
+        self.save_stats = kwargs.get("save_stats", False)
+        self.stats_filepath: Optional[str] = kwargs.get("stats_filepath", None)
+        self.stats = dict(tries=0, fails=0, urls=[])
+
+    def add_stat(self, url: str, success: bool):
+        if not self.save_stats:
+            return
+        self.stats["tries"] += 1
+        self.stats["fails"] += 1 if not success else 0
+        self.stats["urls"].append(dict(value=url, processed=success))
+
+    def save_stats_in_file(self):
+        if not self.save_stats:
+            return
+        path = (
+            self.stats_filepath
+            if self.stats_filepath is not None
+            else f"./{self.get_name()}-stats.log"
+        )
+        with open(path, "w+") as file:
+            json.dump(self.stats, file)
 
 
 class NamedResource:
