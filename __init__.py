@@ -7,6 +7,8 @@ import requests
 import time
 from bs4 import BeautifulSoup
 from pathlib import Path
+from datetime import datetime
+from enum import Enum
 
 from utils import NamedResource, ShowsProgress, check_response, HasStats
 
@@ -23,6 +25,13 @@ class ScrappingInfo:
     request_headers: dict
 
 
+class LogLevel(Enum):
+    ERROR = "ERROR"
+    WARNING = "WARNING"
+    INFO = "INFO"
+    DEBUG = "DEBUG"
+
+
 class ScrappingJob(ABC, NamedResource):
     def __init__(self, *args, **kwargs):
         try:
@@ -30,14 +39,29 @@ class ScrappingJob(ABC, NamedResource):
         except TypeError:
             super(ScrappingJob, self).__init__()
 
-    def print_statement(self, msg: str, file: Optional[TextIOWrapper]):
-        if file is not None:
-            print(msg, file=file, flush=True)
-        print(msg, flush=True)
+    def __format_msg(self, lvl: LogLevel, msg: str) -> str:
+        return f"{lvl.value}: {self.get_name()} - {datetime.now().isoformat()}| {msg}"
 
-    def log_statement(self, msg: str, file: Optional[TextIOWrapper]):
+    def print_statement(
+        self,
+        msg: str,
+        lvl: LogLevel = LogLevel.INFO,
+        file: Optional[TextIOWrapper] = None,
+    ):
+        formatted_msg = self.__format_msg(lvl, msg)
         if file is not None:
-            print(msg, file=file)
+            print(formatted_msg, file=file, flush=True)
+        print(formatted_msg, flush=True)
+
+    def log_statement(
+        self,
+        msg: str,
+        lvl: LogLevel = LogLevel.INFO,
+        file: Optional[TextIOWrapper] = None,
+    ):
+        formatted_msg = self.__format_msg(lvl, msg)
+        if file is not None:
+            print(formatted_msg, file=file)
 
     @abstractmethod
     def execute(self, urls: List[str], info: ScrappingInfo):
@@ -57,7 +81,6 @@ class URLScrapper(ScrappingJob, ShowsProgress, HasStats):
         self.base_description = kwargs.get("description", "Scrapping urls")
         # Job
         self.job = job
-        print(self.get_name())
 
     def get_urls(self, url: str, info: ScrappingInfo) -> Optional[List[str]]:
         try:
@@ -83,7 +106,9 @@ class URLScrapper(ScrappingJob, ShowsProgress, HasStats):
             return list(map(complete_url, urls))
         except Exception as e:
             super().add_fail()
-            super().log_statement(f"Failed job for {url}: {e}", info.log_file)
+            super().log_statement(
+                f"Failed job for {url}: {e}", LogLevel.ERROR, info.log_file
+            )
             return None
 
     def execute(self, urls: List[str], info: ScrappingInfo):
@@ -121,7 +146,7 @@ class URLScrapper(ScrappingJob, ShowsProgress, HasStats):
                 data: Optional[List[str]] = future.result()
             except Exception as e:
                 super().log_statement(
-                    f"Could not search in url {url}: {e}", info.log_file
+                    f"Could not search in url {url}: {e}", LogLevel.ERROR, info.log_file
                 )
                 self.add_stat(url, False)
             else:
@@ -140,9 +165,12 @@ class URLScrapper(ScrappingJob, ShowsProgress, HasStats):
         fails = self.stats["fails"]
         super().print_statement(
             f"Scanned {tries} pages, failed to get {fails}",
+            LogLevel.INFO,
             log_file,
         )
-        super().print_statement(f"{self.found_len} links found", log_file)
+        super().print_statement(
+            f"{self.found_len} links found", LogLevel.INFO, log_file
+        )
         self.save_stats_in_file()
 
 
@@ -157,16 +185,18 @@ class URLProcessor(ScrappingJob):
     def execute(self, urls: List[str], info: ScrappingInfo):
         if not self.async_:
             try:
-                super().print_statement("Processing urls...", info.log_file)
+                super().print_statement(
+                    "Processing urls...", LogLevel.INFO, info.log_file
+                )
                 self.processor(urls)
             except Exception as e:
                 super().print_statement(
-                    f"Error while processing files: {e}", info.log_file
+                    f"Error while processing files: {e}", LogLevel.ERROR, info.log_file
                 )
             return urls
 
         super().print_statement(
-            "Error: async not implemented, skipping job", info.log_file
+            "Error: async not implemented, skipping job", LogLevel.ERROR, info.log_file
         )
         return urls
 
@@ -199,7 +229,7 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
                 # TODO: identify file extension and download accordingly
                 f.write(response.content)
         except Exception as ex:
-            super().log_statement(ex, info.log_file)
+            super().log_statement(ex, LogLevel.ERROR, info.log_file)
             super().add_fail()
             return False
         else:
@@ -211,7 +241,9 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
         ) as executor:
             future_to_url = {}
 
-            super().print_statement(f"Fetching {len(urls)} files", info.log_file)
+            super().print_statement(
+                f"Fetching {len(urls)} files", LogLevel.INFO, info.log_file
+            )
             super().init_progress_bar(len(urls), self.base_description)
 
             index_offset = 0
@@ -239,7 +271,9 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
                 self.add_stat(url, True)
             except Exception as ex:
                 super().log_statement(
-                    f"Could not download image for {url}: {ex}", info.log_file
+                    f"Could not download image for {url}: {ex}",
+                    LogLevel.ERROR,
+                    info.log_file,
                 )
                 self.add_stat(url, False)
 
@@ -247,6 +281,7 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
         super().clear_progress_bar()
         super().print_statement(
             f"Tried to download {super().get_tries()} images, failed to download {super().get_fails()}",
+            LogLevel.INFO,
             log_file,
         )
         self.save_stats_in_file()
