@@ -214,7 +214,7 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
 
         self.append_files = kwargs.get("append_files", True)
 
-    def __download_image(self, url: str, path: str, info: ScrappingInfo):
+    def __download_image(self, url: str, path: str, info: ScrappingInfo) -> bool:
         try:
             super().advance_progress()
             response = requests.get(
@@ -249,11 +249,15 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
             index_offset = 0
 
             for index, image in enumerate(urls):
-                image_name = f"{self.base_name}-{index+index_offset:04d}.jpg"
+                file_extension: str = image.split(".")[-1]
+                if file_extension is None or file_extension == image or file_extension == '' or len(file_extension) > 4:
+                    super().print_statement(f"Unknown file type for {image}", LogLevel.WARNING, info.log_file)
+                    file_extension = "jpg"
+                image_name = f"{self.base_name}-{index+index_offset:04d}.{file_extension}"
                 image_path = self.directory + image_name
                 while self.append_files and Path(image_path).exists():
                     index_offset += 1
-                    image_name = f"{self.base_name}-{index+index_offset:04d}.jpg"
+                    image_name = f"{self.base_name}-{index+index_offset:04d}.{file_extension}"
                     image_path = self.directory + image_name
 
                 future_to_url.update(
@@ -267,8 +271,8 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
         for future in concurrent.futures.as_completed(future_to_url):
             url = future_to_url[future]
             try:
-                future.result()
-                self.add_stat(url, True)
+                res: bool = future.result()
+                self.add_stat(url, res)
             except Exception as ex:
                 super().log_statement(
                     f"Could not download image for {url}: {ex}",

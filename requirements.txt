@@ -1,0 +1,7 @@
+tqdm
+icecream
+requests
+bs4
+functools
+pathlib
+typing

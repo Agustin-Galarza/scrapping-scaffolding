@@ -63,6 +63,7 @@ class HasStats:
         except TypeError:
             super(HasStats, self).__init__()
         self.save_stats = kwargs.get("save_stats", False)
+        # TODO: separate file name from path
         self.stats_filepath: Optional[str] = kwargs.get("stats_filepath", None)
         self.stats = dict(tries=0, fails=0, urls=[])
 
