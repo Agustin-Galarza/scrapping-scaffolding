@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from enum import Enum
 
-from utils import NamedResource, ShowsProgress, check_response, HasStats
+from scrapper.utils import NamedResource, ShowsProgress, check_response, HasStats
 
 
 @dataclass
@@ -207,10 +207,13 @@ class URLProcessor(ScrappingJob):
 class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
     def __init__(self, *args, **kwargs):
         super(FileDownloader, self).__init__(**kwargs)
-        self.directory = kwargs.get("dir", "./")
-        self.base_name = kwargs.get("basename", "file")
-        self.base_description = kwargs.get("description", "Downloading files")
-        self.file_download_timeout = kwargs.get("file_timeout", 40)
+        self.directory: str = kwargs.get("dir", "./")
+        if not self.directory.endswith('/'):
+            self.directory += '/'
+        self.base_name: str = kwargs.get("basename", "file")
+        self.base_description: str = kwargs.get("description", "Downloading files")
+        self.file_download_timeout: int = kwargs.get("file_timeout", 40)
+        self.excluded_file_extensions: List[str] = kwargs.get('excluded_file_extensions', [])
 
         self.append_files = kwargs.get("append_files", True)
 
@@ -226,7 +229,6 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
                 time.sleep(info.request_cooldown)
 
             with open(path, "wb") as f:
-                # TODO: identify file extension and download accordingly
                 f.write(response.content)
         except Exception as ex:
             super().log_statement(ex, LogLevel.ERROR, info.log_file)
@@ -253,11 +255,14 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
                 if file_extension is None or file_extension == image or file_extension == '' or len(file_extension) > 4:
                     super().print_statement(f"Unknown file type for {image}", LogLevel.WARNING, info.log_file)
                     file_extension = "jpg"
-                image_name = f"{self.base_name}-{index+index_offset:04d}.{file_extension}"
+                if file_extension in self.excluded_file_extensions:
+                    super().print_statement(f"{file_extension} file extension found. Skipping.", LogLevel.DEBUG, info.log_file)
+                    continue
+                image_name = f"{self.base_name}-{index+index_offset:04d}.{file_extension.lower()}"
                 image_path = self.directory + image_name
                 while self.append_files and Path(image_path).exists():
                     index_offset += 1
-                    image_name = f"{self.base_name}-{index+index_offset:04d}.{file_extension}"
+                    image_name = f"{self.base_name}-{index+index_offset:04d}.{file_extension.lower()}"
                     image_path = self.directory + image_name
 
                 future_to_url.update(
@@ -268,6 +273,7 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
                     }
                 )
 
+        failed_urls = []
         for future in concurrent.futures.as_completed(future_to_url):
             url = future_to_url[future]
             try:
@@ -279,8 +285,11 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
                     LogLevel.ERROR,
                     info.log_file,
                 )
+                failed_urls.append(url)
                 self.add_stat(url, False)
-
+        super().clear_progress_bar()
+        return failed_urls
+    
     def on_exit(self, log_file: Optional[TextIOWrapper]) -> None:
         super().clear_progress_bar()
         super().print_statement(
@@ -294,12 +303,14 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
 class Scrapper:
     def __init__(self, job_sequence: List[ScrappingJob], *args, **kwargs):
         self.job_sequence = job_sequence
+        self.name = kwargs.get('name', 'scrapper')
         self.__check_jobs()
         log_file = None
-        if (usr_path := kwargs.get("log_file", None)) is not None:
-            log_filepaht = Path(usr_path)
-            log_filepaht.touch(exist_ok=True)
-            log_file = open(log_filepaht, "w+")
+
+        log_path = Path(kwargs.get("log_path", "./"))
+        log_filepaht = Path.joinpath(log_path, kwargs.get("log_file", f"{self.name}.log"))
+        log_filepaht.touch(exist_ok=True)
+        log_file = open(log_filepaht, "w+")
         self.scrapping_info = ScrappingInfo(
             html_parser="html.parser",
             base_url=kwargs.get("base_url", ""),
@@ -320,6 +331,7 @@ class Scrapper:
         to_process = urls
 
         for job in self.job_sequence:
+            print("Starting job", job.name)
             to_process = job.execute(to_process, self.scrapping_info)
             job.on_exit(self.scrapping_info.log_file)
 

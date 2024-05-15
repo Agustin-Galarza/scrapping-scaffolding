@@ -1,6 +1,6 @@
-from __init__ import Scrapper, FileDownloader, URLScrapper, URLProcessor
+from scrapper import Scrapper, FileDownloader, URLScrapper, URLProcessor
 from bs4 import BeautifulSoup
-from typing import List
+from typing import List, Optional
 from functools import partial
 from pathlib import Path
 import json
@@ -56,86 +56,26 @@ def load_failed(previous: List[str], path: Path):
         return failed
 
 
-def get_willow_pages(soup: BeautifulSoup) -> List[str]:
-    pages = []
-    for link in soup.find_all("a"):
-        if (
-            link.img is not None
-            and len(link.img.get("class")) > 0
-            and link.img.get("class")[0].startswith("thumbnail")
-        ):
-            pages.append(link.get("href"))
-    if len(pages) == 0:
-        raise Exception("No pages found")
-    return pages
-
-
-def get_willow_links(soup: BeautifulSoup) -> List[str]:
-    for link in soup.find_all("a"):
-        if link.get("href").endswith(".jpg"):
-            return [link.get("href")]
-    return None
-
-
-def get_willow_pics():
-    urls = [f"https://faponic.com/willowsdreaming/{i}" for i in range(202)]
-
-    Scrapper(
-        [
-            # URLScrapper(
-            #     get_willow_pages,
-            #     description="Fetching pages",
-            #     save_stats=True,
-            #     name="Find pages",
-            #     stats_filepath="output/willow-pages-stats",
-            # ),
-            URLScrapper(
-                get_willow_links,
-                description="Fetching image links",
-                save_stats=True,
-                name="Find images",
-                stats_filepath="output/willow-images-stats",
-            ),
-            FileDownloader(
-                dir="./output/images/",
-                file_timeout=120,
-                name="Download images",
-                basename="image",
-                save_stats=True,
-                stats_filepath="output/willow-download-stats",
-            ),
-        ],
-        base_url="https://faponic.com",
-        sparse_requests=False,
-        request_cooldown=0.1,
-        request_timeout=10,
-        log_file="./test.willow.log",
-        request_headers={
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
-        },
-        max_workers=16,
-    ).run(urls)
-
-
 def retry_for_failures(output_folder='output/'):
     print("\n-------------------------------------------------------------------------------------------------------\n")
     scrapper = Scrapper(
         [
-            URLProcessor(partial(load_failed, path=Path(f"{output_folder}/images-stats"))),
+            URLProcessor(partial(load_failed, path=Path(f"{output_folder}/images-stats.json"))),
             URLScrapper(
                 get_bunkrr_links,
                 description="Fetching image links",
                 save_stats=True,
                 name="Find images",
-                stats_filepath="output/images-stats-retry",
+                stats_filepath=f"{output_folder}/images-stats-retry.json",
             ),
-            URLProcessor(partial(load_failed, path=Path(f"{output_folder}/download-stats"))),
+            URLProcessor(partial(load_failed, path=Path(f"{output_folder}/download-stats.json"))),
             FileDownloader(
                 dir=f"{output_folder}/images/",
                 file_timeout=120,
                 name="Download images",
                 basename="image",
-                stats_filepath="output/download-stats-retry",
+                stats_filepath=f"{output_folder}/download-stats-retry.json",
+                save_stats=True,
                 append_files=True,
             ),
         ],
@@ -153,13 +93,20 @@ def retry_for_failures(output_folder='output/'):
     scrapper.run([])
 
 
-def main(output_folder = 'output/', url = None):
+def main(output_folder = 'output/', output_name: Optional[str] = None, identifier: Optional[str] = None, url = None):
     urls = ["https://bunkr.sk/a/4W0sH4Jc"] if url is None else [url]
 
+    scrapper_name = 'scrapper'
+    if output_name is not None:
+        output_folder = Path.joinpath(Path(output_folder), output_name)
+        scrapper_name = output_name
     if not Path(output_folder).exists():
         Path(output_folder).mkdir()
     if not Path(f"{output_folder}/images").exists():
         Path(f"{output_folder}/images").mkdir()
+
+    if identifier is not None:
+        scrapper_name += f" - {identifier}"
 
     scrapper = Scrapper(
         [
@@ -168,7 +115,7 @@ def main(output_folder = 'output/', url = None):
                 description="Fetching pages",
                 save_stats=True,
                 name="Find pages",
-                stats_filepath=f"{output_folder}/pages-stats",
+                stats_filepath=f"{output_folder}/pages-stats.json",
             ),
             # URLProcessor(write_page_links),
             URLScrapper(
@@ -176,7 +123,7 @@ def main(output_folder = 'output/', url = None):
                 description="Fetching image links",
                 save_stats=True,
                 name="Find images",
-                stats_filepath=f"{output_folder}/images-stats",
+                stats_filepath=f"{output_folder}/images-stats.json",
             ),
             # URLProcessor(write_image_links),
             FileDownloader(
@@ -185,25 +132,35 @@ def main(output_folder = 'output/', url = None):
                 name="Download images",
                 basename="image",
                 save_stats=True,
-                stats_filepath=f"{output_folder}/download-stats",
+                stats_filepath=f"{output_folder}/download-stats.json",
+            ),
+            FileDownloader(
+                dir=f"./{output_folder}/images/",
+                file_timeout=120,
+                name="Retry failures",
+                basename="image",
+                save_stats=True,
+                append_files=True,
+                stats_filepath=f"{output_folder}/retry-stats.json",
             ),
         ],
+        name=scrapper_name,
         base_url="https://bunkrr.su",
-        sparse_requests=False,
-        request_cooldown=0.1,
+        sparse_requests=True,
+        request_cooldown=0.3,
         request_timeout=10,
-        log_file="./output/test.log",
+        log_path="./output",
         request_headers={
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
         },
         max_workers=16,
     )
-
-
     scrapper.run(urls)
 
 if __name__ == "__main__":
-    output_folder = "output/"
-    url = 'https://bunkr.sk/a/rU0U5eAl'
-    main(output_folder, url)
-    retry_for_failures(output_folder)
+    output_folder = "output"
+    album = "Toph"
+    url = 'https://bunkrrr.org/a/WhtHumYC'
+    # https://bunkr.sk/a/9mou5a5O
+    main(output_folder=output_folder, output_name=album, url=url)
+    # retry_for_failures(output_folder)

@@ -2,6 +2,5 @@ tqdm
 icecream
 requests
 bs4
-functools
 pathlib
-typing
+typing==3.7.4.3

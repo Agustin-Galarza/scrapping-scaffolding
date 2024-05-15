@@ -83,7 +83,7 @@ class HasStats:
             else f"./{self.get_name()}-stats.log"
         )
         with open(path, "w+") as file:
-            json.dump(self.stats, file)
+            json.dump(self.stats, file, indent=4)
 
 
 class NamedResource:
