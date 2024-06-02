@@ -1,0 +1,3 @@
+[console_scripts]
+scrapper = scrapper.main:main
+searcher = searcher.main:main

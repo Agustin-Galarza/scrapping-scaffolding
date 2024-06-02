@@ -5,3 +5,8 @@ __pycache__/
 *.log
 *-stats
 output/
+cache/
+config/
+build/
+.venv/
+.env

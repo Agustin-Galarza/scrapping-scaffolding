@@ -13,7 +13,7 @@ def prepare_parser() -> ArgumentParser:
 
     parser.add_argument('-c','--config-file',type=str,default='./config/searcher.config.json',help='Defines the path for the config file')
 
-    parser.add_argument('-p','--print-results',action='store_true',help='When set prints the results from the search to the console')
+    parser.add_argument('--omit-results',action='store_true',help='When set avoid printing the results from the search to the console')
     parser.add_argument('-l','--load-pages',type=int,default=1,help='Defines the amount of pages from the query result to load into the search result.')
 
     parser.add_argument('-d','--download',action='store_true',help='When set, downloads the results from the search, up to [max-size]')
@@ -22,6 +22,7 @@ def prepare_parser() -> ArgumentParser:
     parser.add_argument('-M','--max-total-size',type=str,help='Max total size to download (1 KB = 1024 B)')
     parser.add_argument('-m','--max-album-size',type=str,help='Max size for an album to download it (1 KB = 1024 B)')
     parser.add_argument('-f','--filter-download',type=str,help='When downloading, filter the downloaded albums by this string as a regular expression.')
+    parser.add_argument('--merge-expr',type=str,default=None,help='Regular expression to extract the name of the album from the url. This is used to merge the results into a single download.')
 
     parser.add_argument('-v','--verbose',action='store_true',help='Set verbose mode')
     return parser
@@ -34,7 +35,7 @@ def main():
     print(f'Searching on Bunkr site for query {args.query}')
     result = searcher.search(args.query, max_loaded_pages=args.load_pages)
     print('Search successful!')
-    if args.print_results:
+    if not args.omit_results and not args.download:
         print(result)
     
     if args.download:
@@ -46,6 +47,7 @@ def main():
             args.max_total_size, 
             args.max_album_size, 
             args.filter_download, 
+            args.merge_expr,
             args.verbose
             )
 

@@ -114,6 +114,14 @@ class URLScrapper(ScrappingJob, ShowsProgress, HasStats):
     def execute(self, urls: List[str], info: ScrappingInfo):
         output_links = []
         future_to_url = {}
+        if self.get_stats()['fails'] > 0:
+            urls = self.get_failed_urls()
+            self.remove_failed_urls()
+        elif self.get_stats()['tries'] > 0:
+            urls = self.get_all_urls()
+            self.found_len = len(urls)
+            return urls
+
         super().init_progress_bar(len(urls), self.base_description)
 
         if len(urls) < 10:
@@ -219,14 +227,13 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
 
     def __download_image(self, url: str, path: str, info: ScrappingInfo) -> bool:
         try:
+            if info.sparse_requests:
+                time.sleep(info.request_cooldown)
             super().advance_progress()
             response = requests.get(
                 url, timeout=self.file_download_timeout, headers=info.request_headers
             )
             check_response(response)
-
-            if info.sparse_requests:
-                time.sleep(info.request_cooldown)
 
             with open(path, "wb") as f:
                 f.write(response.content)
@@ -242,7 +249,16 @@ class FileDownloader(ScrappingJob, ShowsProgress, HasStats):
             max_workers=info.max_workers
         ) as executor:
             future_to_url = {}
-
+            
+            if self.get_stats()['fails'] > 0:
+                print('Retrying failed urls')
+                urls = self.get_failed_urls()
+                self.remove_failed_urls()
+            elif self.get_stats()['tries'] > 0:
+                print('There are no failures. Continuing...')
+                urls = self.get_all_urls()
+                return urls
+            
             super().print_statement(
                 f"Fetching {len(urls)} files", LogLevel.INFO, info.log_file
             )

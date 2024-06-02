@@ -13,14 +13,17 @@ class JSONable(ABC):
         return json.dumps(self.__dict__)
 
     @classmethod
+    def from_dict(cls, data: dict) -> Self:
+        return cls(**data)
+        
+    @classmethod
     def from_json(cls, file_path: Union[str,Path]) -> Self:
         with open(file_path, 'r') as file:
-            data = json.load(file)
-            return cls(**data)
+            return cls.from_dict(json.load(file))
 
     @classmethod
     def from_json_str(cls, data: str) -> Self:
-        return cls(**json.loads(data))    
+        return cls.from_dict(json.loads(data))
 
 
 class JSONableDataclass(JSONable):

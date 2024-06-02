@@ -1,5 +1,5 @@
 from bs4 import BeautifulSoup, Tag
-from typing import List, Set, Iterable, Optional, Dict, Union
+from typing import List, Set, Iterable, Optional, Dict, Union, Any, Generic, TypeVar, Type
 from pathlib import Path
 import json
 import requests
@@ -8,18 +8,22 @@ from io_utils.json import JSONable, JSONableDataclass
 from typing_extensions import Self
 from searcher.download.bunkr import prepare_bunkr_scrapper
 import re
+from time import time
+from .utils import parse_download_name, parse_size_name, parse_size_bytes,Color
+from functools import reduce
 
-from .utils import parse_download_name, parse_size_name, parse_size_bytes
 
 @dataclass
 class Config:
     downloads: Path = Path('./output')
+    cache: Path = Path('./cache')
 
 def load_config(config_path: Path) -> Config:
     with config_path.open('r') as file:
         c = json.load(file)
         return Config(
-            downloads=Path(c['downloads'])
+            downloads=Path(c['downloads']),
+            cache=Path(c['cache'])
         )
 
 @dataclass
@@ -77,7 +81,7 @@ downloaded: {self.downloaded}
 """
     
     def short_str(self) -> str:
-        return f"{self.name} || {self.url} || {self.size} || {'Not ' if not self.downloaded else ' '}Downloaded"
+        return "{: <45} | {: >30} | {: >10} | {}".format(self.name, self.url, self.size, ('Not ' if not self.downloaded else '') + 'Downloaded')
 
 
 def save_downloaded(downloaded: List[str], downloaded_path = 'output/downloaded.json') -> None:
@@ -101,31 +105,92 @@ def cook_soup(url: str) -> BeautifulSoup:
         raise Exception(f'Response returned error status {res.status_code}: {res.text}')
     return BeautifulSoup(res.text, 'html.parser')
 
-
+@dataclass
 class BunkrSearch(JSONable):
     query: str
-    results: List[AlbumInfo]
+    results: Dict[int, List[AlbumInfo]]
+    results_amount: int
     pages: int
+    total_pages: int = None
 
-    def __init__(self, query: str, results: List[AlbumInfo], results_amount: int, pages: Dict[int, Optional[Iterable[LinkInfo]]]) -> None:
-        self.query = query
-        self.results = results
-        self.__results_len = results_amount
-        self.__pages = pages
+    def get_albums(self) -> List[AlbumInfo]:
+        return list(reduce(lambda x, y: x + y, self.results.values()))
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str,Any]) -> Self:
+        results = {int(k): [AlbumInfo(**a) for a in v] for k,v in data['results'].items()}
+        return cls(data['query'], results, data['results_amount'], data['pages'])
 
-        self.pages = max(self.__pages.keys())
-        
     def __str__(self) -> str:
-        res = "\n".join(["\t\t" + r.short_str() for r in self.results])
+        albums = self.get_albums()
+        res = "\n".join(["\t\t" + a.short_str() for a in albums])
         return f"""
-Search Result for {self.query}:
-\talbums found: {self.__results_len}
-\ttotal pages: {self.pages}
-\tresults:
+Search Result for {Color.bold(self.query)}:
+\t{Color.underline("Albums found")}: {self.results_amount}
+\t{Color.underline("Pages loaded")}: {self.pages}
+\t{Color.underline("Total pages")}: {self.total_pages}
+\t{Color.underline("Results")}:
 {res}
 
-Total Size: {parse_size_bytes(sum([r.get_size_bytes() for r in self.results]))}
+Total Size: {parse_size_bytes(sum([a.get_size_bytes() for a in albums]))}
 """
+
+C=TypeVar('C')
+
+@dataclass
+class CacheObject(JSONable, Generic[C]):
+    value: C
+    expires_at: int
+    created_at: int
+
+class CacheManager:
+    
+    def __init__(self, cache_path: Path) -> None:
+        self.cache_path = cache_path
+        self.cache = self.__load_cache()
+
+    def __load_cache(self) -> Dict[str, CacheObject[Any]]:
+        if not self.cache_path.exists():
+            return dict()
+        with self.cache_path.open('r') as file:
+            return json.load(file)
+
+    def save_cache(self) -> None:
+        with self.cache_path.open('w+') as file:
+            json.dump(self.cache, file,default=lambda x: asdict(x))
+
+    def get(self, key: str, default: Optional[CacheObject[C]]=None, value_cls: Optional[Type[C]]=None) -> Optional[C]:
+        data = self.cache.get(key, None)
+        if data is None:
+            return default
+        data = CacheObject(**data)
+        if data.expires_at < int(time()):
+            self.cache.pop(key)
+            return default
+        if value_cls is not None:
+            try:
+                return value_cls.from_dict(data.value)
+            except:
+                pass
+            try:
+                return value_cls(**data.value)
+            except:
+                pass
+            try:
+                return value_cls(data.value)
+            except:
+                raise Exception(f'Could not parse value of key {key} to {value_cls}')
+        return data.value
+    
+    def set(self, key: str, value: Any, expires_in: int) -> None:
+        self.cache[key] = CacheObject(value, int(time()) + expires_in, int(time()))
+        self.save_cache()
+
+    def remove(self, key: str) -> None:
+        try:
+            self.cache.pop(key)
+        except KeyError:
+            pass
 
 
 class BunkrSearcher:
@@ -134,40 +199,27 @@ class BunkrSearcher:
         self.config = config
         self.search_history: List[BunkrSearch] = []
         self.downloads: List[DownloadInfo] = self.__load_downloads()
+        self.cache = CacheManager(config.cache.joinpath('searches.json'))
 
     def search(self, query: str, save: bool = True, max_loaded_pages: int = 1) -> BunkrSearch:
-        soup = cook_soup(self.__build_url(query))
-
-        pages_amount = self.__get_pages_amount(soup)
-        pages: Dict[int, Optional[Iterable[LinkInfo]]] = {n: None for n in range(1, pages_amount+1)}
-        links = self.__get_result_links(soup)
-        pages[1] = links if links != [] else None
-
-        if max_loaded_pages > 1:
-            for page in range(2, max_loaded_pages+1):
-                l = self.__get_result_links(cook_soup(self.__build_url(query, page)))
-                pages[page] = l if l != [] else None
-        
-        results: List[AlbumInfo] = []
-        results_len = 0
-        for page, link_list in pages.items():
-            if link_list is None:
+        search_result: BunkrSearch = self.cache.get(query, BunkrSearch(query,{},0,0), BunkrSearch)
+        if search_result.total_pages == None:
+            soup = cook_soup(self.__build_url(query))
+            search_result.total_pages = self.__get_pages_amount(soup)
+        for page in range(1, max_loaded_pages+1):
+            if page <= search_result.pages and search_result.results[page] != []:
                 continue
+            l = self.__get_result_links(cook_soup(self.__build_url(query, page)))
+            albums = [self.__get_album_info(link.url) for link in l]
             
-            for link in link_list:
-                info: AlbumInfo = self.__get_album_info(link.url)
-                results.append(info)
-                results_len += 1
-
-        search = BunkrSearch(
-            query,
-            results,
-            results_len,
-            pages
-            )
+            search_result.results[page] = albums
+            search_result.results_amount += len(albums)
+            search_result.pages += 1
+       
         if save:
-            self.search_history.append(search)
-        return search
+            self.search_history.append(search_result)
+        self.cache.set(query, search_result, 3600*24) # Searches last for a day
+        return search_result
 
     def __is_downloaded(self, name: str) -> bool:
         for d in self.downloads:
@@ -218,7 +270,7 @@ class BunkrSearcher:
 def download_results(
         search: BunkrSearch, 
         output_path: Path, content_path: Optional[Path]=None, max_size: Optional[str]=None, max_album_size: Optional[str]=None,
-        filter_query: Optional[str]=None, 
+        filter_query: Optional[str]=None, merge_query: Optional[str]=None,
         verbose=False):
     
     if not output_path.is_dir():
@@ -226,7 +278,7 @@ def download_results(
     max_size_int = parse_size_name(max_size) if max_size is not None else None
     max_album_size_int = parse_size_name(max_album_size) if max_album_size is not None else None
     acum_size = 0
-    results: List[AlbumInfo] = []
+    results: Dict[str, List[AlbumInfo]] = dict()  
     # TODO: add name mapping (extract with regex) to join results
     for res in search.results:
         if (filter_query is not None) and re.search(filter_query, res.name) is None:
@@ -247,13 +299,15 @@ def download_results(
         if verbose:
             print(f'Added {res.name} to downloads')
         acum_size += result_size
-        results.append(res)
+        m = re.match(merge_query, res.name)
+        key = res.name if m is None else res.name[m.start():m.end()]
+        results.setdefault(key, []).append(res)
         res.downloaded = True
 
-    results_len = len(results)
+    results_len = len(results.keys())
     print(f'Downloading {results_len} album{"s" if results_len > 1 else ""} into {output_path}')
-    for res in results:
-        safe_name = res.name.replace('/', '|').replace('.', '_')
-        prepare_bunkr_scrapper(safe_name, output_path.joinpath(safe_name), content_path).run([res.url])
+    for name, res in results.items():
+        safe_name = name.replace('/', '|').replace('.', '_')
+        prepare_bunkr_scrapper(safe_name, output_path.joinpath(safe_name), content_path).run([r.url for r in res])
     
 

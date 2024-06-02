@@ -16,6 +16,10 @@ def parse_size_name(size: str, format='kibi') -> int:
     return int(float(number)*UNIT_NAMES[unit][format])
 
 def parse_size_bytes(bytes: int, format='kibi') -> str:
+    if bytes < 0:
+        raise ValueError(f"Bytes value cannot be negative, is {bytes}")
+    if bytes == 0:
+        return "0 B"
     b = 2 if format == 'kibi' else 10
     p = int(math.log(bytes, b))
     dim = int(p/(10 if format == 'kibi' else 3))
@@ -23,3 +27,27 @@ def parse_size_bytes(bytes: int, format='kibi') -> str:
 
 def parse_download_name(name: str) -> str:
     return name.replace('/', '|').replace('.', '_')
+
+class Color:
+    PURPLE = '\033[95m'
+    CYAN = '\033[96m'
+    DARKCYAN = '\033[36m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+
+    @staticmethod
+    def with_color(message: str, color: str,bold=False,underline=False) -> str:
+        return f"{Color.UNDERLINE if underline else ''}{Color.BOLD if bold else ''}{color}{message}{Color.END}"
+    
+    @staticmethod
+    def bold(message: str) -> str:
+        return f"{Color.BOLD}{message}{Color.END}"
+    
+    @staticmethod
+    def underline(message: str) -> str:
+        return f"{Color.UNDERLINE}{message}{Color.END}"
