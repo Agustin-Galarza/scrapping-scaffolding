@@ -19,6 +19,8 @@ class Config:
     cache: Path = Path('./cache')
 
 def load_config(config_path: Path) -> Config:
+    if not config_path.exists():
+        config_path.open('w+').write(json.dumps(asdict(Config()), default=lambda x: str(x)))
     with config_path.open('r') as file:
         c = json.load(file)
         return Config(
